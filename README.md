@@ -184,3 +184,21 @@ From **Run and Debug**:
 - `OmniAI Full Stack` (compound)
 
 These settings are included in `.vscode/tasks.json`, `.vscode/launch.json`, and `.vscode/settings.json`.
+
+
+## 10) Troubleshooting: "No response" in chat
+
+If the UI sends but you get no answer:
+
+1. Confirm backend is running on `http://localhost:8080`.
+2. Confirm `server/.env` exists and `HUGGINGFACE_API_KEY` is set.
+3. Restart backend after env updates.
+4. In frontend, ensure `VITE_API_BASE_URL` matches your backend URL if you changed ports.
+5. Test backend directly:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/api/models
+```
+
+If these fail, fix backend first. If they pass but `/api/chat` fails, inspect the JSON error message returned by the endpoint.

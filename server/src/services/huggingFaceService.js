@@ -2,12 +2,36 @@ import { env } from '../config/env.js';
 import { buildPromptFromMessages } from '../utils/prompt.js';
 
 function extractTextFromHF(payload) {
-  if (Array.isArray(payload) && payload[0]?.generated_text) {
-    return payload[0].generated_text;
+  if (Array.isArray(payload)) {
+    const [first] = payload;
+
+    if (typeof first?.generated_text === 'string') {
+      return first.generated_text;
+    }
+
+    if (typeof first?.summary_text === 'string') {
+      return first.summary_text;
+    }
+
+    if (typeof first?.translation_text === 'string') {
+      return first.translation_text;
+    }
+
+    if (Array.isArray(first) && typeof first[0]?.generated_text === 'string') {
+      return first[0].generated_text;
+    }
   }
 
   if (typeof payload?.generated_text === 'string') {
     return payload.generated_text;
+  }
+
+  if (typeof payload?.summary_text === 'string') {
+    return payload.summary_text;
+  }
+
+  if (Array.isArray(payload?.choices) && typeof payload.choices[0]?.text === 'string') {
+    return payload.choices[0].text;
   }
 
   return '';
@@ -58,7 +82,7 @@ export async function requestHuggingFaceChat({ modelId, messages }) {
     };
   }
 
-  const text = extractTextFromHF(payload);
+  const text = extractTextFromHF(payload).trim();
 
   if (!text) {
     return {

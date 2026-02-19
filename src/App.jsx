@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatComposer from './components/ChatComposer';
 import MessageBubble from './components/MessageBubble';
 import ModelSelector from './components/ModelSelector';
@@ -6,15 +6,14 @@ import Sidebar from './components/Sidebar';
 import { initialChats } from './data/mockChats';
 import { modelCatalog } from './data/models';
 
-function createAssistantMessage(modelId, prompt) {
-  const modelName = modelCatalog.find((model) => model.id === modelId)?.name ?? 'Selected model';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
-  return {
-    id: crypto.randomUUID(),
-    role: 'assistant',
-    content: `Using ${modelName}, here is a structured response to: "${prompt}"\n\n- This UI now supports code blocks with copy, model status, and multimodal action buttons.\n- Backend streaming/auth integrations will be wired in next phase.`,
-  };
-}
+const errorMap = {
+  api: 'API error: Please verify backend endpoint and key configuration.',
+  no_response: 'No response: The selected model did not return output.',
+  rate_limit: 'Rate limited: Please wait a moment and retry.',
+  setup_error: 'Server setup error: add HUGGINGFACE_API_KEY in server/.env and restart backend.',
+};
 
 function LoadingDots() {
   return (
@@ -27,18 +26,21 @@ function LoadingDots() {
   );
 }
 
-const errorMap = {
-  api: 'API error: Please verify backend endpoint and key configuration.',
-  no_response: 'No response: The selected model did not return output.',
-  rate_limit: 'Rate limited: Please wait a moment and retry.',
-};
+function toApiMessages(messages) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
+}
 
 export default function App() {
   const [chats, setChats] = useState(initialChats);
   const [activeChatId, setActiveChatId] = useState(initialChats[0].id);
+  const [models, setModels] = useState(modelCatalog);
   const [selectedModel, setSelectedModel] = useState(modelCatalog[0].id);
   const [pending, setPending] = useState(false);
   const [errorType, setErrorType] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const bottomRef = useRef(null);
 
   const activeChat = useMemo(
@@ -46,46 +48,103 @@ export default function App() {
     [activeChatId, chats],
   );
 
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/models`);
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json();
+        if (Array.isArray(payload?.models) && payload.models.length > 0) {
+          setModels(payload.models);
+          setSelectedModel(payload.models[0].id);
+        }
+      } catch {
+        // Fallback to local model catalog if backend is not available.
+      }
+    };
+
+    loadModels();
+  }, []);
+
   const sendMessage = async (content) => {
     setErrorType('');
+    setErrorMessage('');
+
     const userMessage = { id: crypto.randomUUID(), role: 'user', content };
+    const nextMessages = [...activeChat.messages, userMessage];
 
     setChats((prev) =>
       prev.map((chat) =>
         chat.id === activeChatId
-          ? { ...chat, messages: [...chat.messages, userMessage], updatedAt: 'Just now' }
+          ? { ...chat, messages: nextMessages, updatedAt: 'Just now' }
           : chat,
       ),
     );
 
     setPending(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: toApiMessages(nextMessages),
+          stream: false,
+        }),
+      });
 
-    if (content.toLowerCase().includes('rate limit')) {
-      setPending(false);
-      setErrorType('rate_limit');
-      return;
-    }
+      const payload = await response.json().catch(() => ({}));
 
-    if (content.toLowerCase().includes('api fail')) {
-      setPending(false);
+      if (!response.ok) {
+        if (response.status === 429 || payload?.error === 'rate_limited') {
+          setErrorType('rate_limit');
+        } else if (payload?.error === 'setup_error') {
+          setErrorType('setup_error');
+        } else if (payload?.error === 'no_response') {
+          setErrorType('no_response');
+        } else {
+          setErrorType('api');
+        }
+
+        setErrorMessage(payload?.message || 'Unable to fetch response from backend.');
+        return;
+      }
+
+      if (!payload?.message || typeof payload.message !== 'string') {
+        setErrorType('no_response');
+        setErrorMessage('Backend returned success but no message content.');
+        return;
+      }
+
+      const assistantMessage = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: payload.message,
+      };
+
+      setChats((prev) =>
+        prev.map((chat) =>
+          chat.id === activeChatId
+            ? { ...chat, messages: [...chat.messages, assistantMessage], updatedAt: 'Just now' }
+            : chat,
+        ),
+      );
+
+      requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
+    } catch {
       setErrorType('api');
-      return;
+      setErrorMessage(
+        'Could not connect to backend. Start server on http://localhost:8080 or set VITE_API_BASE_URL.',
+      );
+    } finally {
+      setPending(false);
     }
-
-    const assistantMessage = createAssistantMessage(selectedModel, content);
-
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === activeChatId
-          ? { ...chat, messages: [...chat.messages, assistantMessage], updatedAt: 'Just now' }
-          : chat,
-      ),
-    );
-
-    setPending(false);
-    requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }));
   };
 
   const clearCurrentChat = () => {
@@ -143,20 +202,7 @@ export default function App() {
               <p className="text-xs text-zinc-400">{activeChat.updatedAt}</p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <ModelSelector
-                models={modelCatalog}
-                selectedModel={selectedModel}
-                onChange={setSelectedModel}
-              />
-              <button
-                onClick={() => setErrorType('no_response')}
-                className="rounded-xl border border-white/10 bg-zinc-900/70 px-3 py-2 text-xs hover:border-rose-400/70"
-                title="Trigger test error"
-              >
-                Trigger Error
-              </button>
-            </div>
+            <ModelSelector models={models} selectedModel={selectedModel} onChange={setSelectedModel} />
           </header>
 
           <main className="flex-1 space-y-4 overflow-y-auto px-4 py-4 lg:px-6">
@@ -169,7 +215,8 @@ export default function App() {
 
           {errorType && (
             <div className="mx-4 mb-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200 lg:mx-6">
-              {errorMap[errorType]}
+              <p>{errorMap[errorType] || errorMap.api}</p>
+              {errorMessage && <p className="mt-1 text-xs text-rose-100/80">{errorMessage}</p>}
             </div>
           )}
 
