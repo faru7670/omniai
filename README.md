@@ -159,3 +159,28 @@ npm run start
 - Email verification flow
 - Persistent user chat history (rename/delete/load)
 - Frontend wiring to real backend routes
+
+
+## 9) VS Code Merge Workflow (Recommended)
+
+This project is now configured for a smooth VS Code full-stack workflow.
+
+### Open project
+- Open the repository root folder in VS Code (`omniai/`).
+- Install recommended extensions when prompted.
+
+### Use ready-made tasks
+From **Terminal → Run Task**:
+- `install:client`
+- `install:server`
+- `dev:all` (runs frontend + backend together)
+- `lint:all`
+- `build:client`
+
+### Debug profiles
+From **Run and Debug**:
+- `Frontend: Chrome (Vite)`
+- `Backend: Node (server)`
+- `OmniAI Full Stack` (compound)
+
+These settings are included in `.vscode/tasks.json`, `.vscode/launch.json`, and `.vscode/settings.json`.
